@@ -101,14 +101,8 @@ func formatDuration(d time.Duration) string {
 }
 
 func (p *Presenter) handleCached(e domain.CommandCached) {
-	spinner, _ := pterm.DefaultSpinner.
-		WithWriter(p.multi.NewWriter()).
-		Start(e.Command.Cmd)
-	spinner.MessageStyle = pterm.NewStyle(pterm.FgGray)
-	spinner.SuccessPrinter = &pterm.PrefixPrinter{
-		Prefix: pterm.Prefix{Text: "○", Style: pterm.NewStyle(pterm.FgGray)},
-	}
-	spinner.Success(fmt.Sprintf("%s (cached)", e.Command.Cmd))
+	writer := p.multi.NewWriter()
+	fmt.Fprintln(writer, pterm.FgGray.Sprintf("○ %s (cached)", e.Command.Cmd))
 }
 
 func (p *Presenter) printFailureOutput(result domain.CommandResult) {
