@@ -86,7 +86,7 @@ func (p *Presenter) formatCompletionMessage(cmd string, duration time.Duration) 
 	if duration < durationDisplayThreshold {
 		return cmd
 	}
-	durationText := pterm.FgGray.Sprintf("(%s)", formatDuration(duration))
+	durationText := pterm.FgGray.Sprint(formatDuration(duration))
 	return fmt.Sprintf("%s %s", cmd, durationText)
 }
 
