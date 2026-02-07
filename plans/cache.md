@@ -57,19 +57,58 @@ api:
   last_pass: 2024-02-06T15:30:00Z
 ```
 
+## Interface
+
+```go
+type Cache interface {
+    Hit(cmd Command) bool
+    RecordResult(cmd Command, success bool)
+    Flush() error
+}
+
+type CommandCached struct {
+    Command Command
+}
+```
+
+- `Hit`: returns true if `cmd.WorkingDir` hash matches cached AND working dir is clean
+- `RecordResult`: tracks success/failure per directory (groups by WorkingDir internally)
+- `Flush`: persists entries where ALL commands for that directory succeeded
+- `CommandCached`: event emitted when a command is skipped due to cache hit
+
 ## Algorithm
 
-On startup:
+### Cache Creation
+
 1. Build cache path: `~/.cache/qa/` + repo path with `/` → `_` + `.yml`
 2. Load cache file if exists
 3. Prune entries where `last_pass` > 7 days old
-4. For each `.qa.yml` directory:
-   - Get current hash: `git rev-parse HEAD:<path>`
-   - Compare to stored hash
-   - If match → skip checks for this directory
-   - If miss → run checks
-5. On successful check, update hash + timestamp
-6. Write cache file
+4. Compute current git tree hashes for relevant directories
+
+### Executor Integration
+
+For each check command:
+```
+if cache.Hit(cmd) {
+    emit CommandCached{Command: cmd}
+    continue
+}
+emit CommandStarted{Command: cmd}
+result := runner.Run(ctx, cmd)
+emit CommandFinished{Result: result}
+cache.RecordResult(cmd, result.State == Completed)
+```
+
+After checks phase completes:
+```
+cache.Flush()
+```
+
+### Cache Implementation
+
+- `Hit`: Compare `cmd.WorkingDir` hash to stored hash, verify `git diff --quiet` passes
+- `RecordResult`: Track per-directory success (all commands must pass)
+- `Flush`: Write cache file, only update entries where all commands succeeded
 
 ## Notes
 

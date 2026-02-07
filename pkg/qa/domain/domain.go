@@ -14,9 +14,7 @@ func (c Command) ID() string {
 type CommandState int
 
 const (
-	Pending CommandState = iota
-	Running
-	Completed
+	Completed CommandState = iota
 	Failed
 )
 
@@ -47,6 +45,12 @@ type CommandRunner interface {
 	Run(ctx context.Context, cmd Command) CommandResult
 }
 
+type Cache interface {
+	Hit(cmd Command) bool
+	RecordResult(cmd Command, success bool)
+	Flush() error
+}
+
 type Event interface {
 	sealed()
 }
@@ -62,6 +66,12 @@ type CommandFinished struct {
 }
 
 func (CommandFinished) sealed() {}
+
+type CommandCached struct {
+	Command Command
+}
+
+func (CommandCached) sealed() {}
 
 type PhaseCompleted struct {
 	Phase   Phase
