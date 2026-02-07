@@ -1,0 +1,262 @@
+START FILE: ./api/scripts/qa
+#!/usr/bin/env bash
+
+# Colors
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+# Parse command line arguments
+FAST_MODE=false
+for arg in "$@"; do
+    if [ "$arg" == "--fast" ]; then
+        FAST_MODE=true
+    fi
+done
+
+qa_checks=(
+	'go vet ./...'
+)
+
+# Add unit tests to checks unless in fast mode
+if [ "$FAST_MODE" = false ]; then
+    qa_checks+=('go test ./...')
+fi
+
+function format() {
+  run_command go fmt ./...
+}
+
+exit_code_file=$(mktemp)
+echo 0 >"$exit_code_file"
+
+pids=()
+
+function run_command() {
+    output=$("$@" 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        echo -e "${RED}ERR:${NC} $output\n\n"
+        echo 1 > $exit_code_file
+    else
+        echo -e "${GREEN}OK:${NC} $@"
+    fi
+}
+
+
+function run_processes_in_parallel() {
+  for ((i = 0; i < ${#qa_checks[@]}; i++))
+  do
+      command="${qa_checks[$i]}"
+
+      echo -e "${BLUE}Running:${NC} ${command}"
+      run_command $command &
+      pids+="$! "
+  done
+}
+
+function wait_for_processes() {
+  for pid in ${pids[@]}; do
+      wait $pid 2> /dev/null
+  done
+}
+
+
+function get_exit_code() {
+  exit_code=$(cat $exit_code_file)
+  rm -f $exit_code_file
+  echo $exit_code
+}
+
+function main() {
+  format
+  run_processes_in_parallel
+  wait_for_processes
+
+  exit $(get_exit_code)
+}
+
+main "$@"
+
+END FILE: ./api/scripts/qa
+
+START FILE: ./app/scripts/qa
+#!/usr/bin/env bash
+
+# Colors
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+# Parse command line arguments
+FAST_MODE=false
+for arg in "$@"; do
+    if [ "$arg" == "--fast" ]; then
+        FAST_MODE=true
+    fi
+done
+
+qa_checks=(
+	# 'npm run typescript_check'
+  'npm run lint_fix'
+)
+
+# Add unit tests to checks unless in fast mode
+if [ "$FAST_MODE" = false ]; then
+    qa_checks+=('npm run test --ci')
+fi
+
+function format() {
+  run_command npm run prettier_fix
+}
+
+exit_code_file=$(mktemp)
+echo 0 >"$exit_code_file"
+
+pids=()
+
+function run_command() {
+    output=$("$@" 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        echo -e "${RED}ERR:${NC} $output\n\n"
+        echo 1 > $exit_code_file
+    else
+        echo -e "${GREEN}OK:${NC} $@"
+    fi
+}
+
+
+function run_processes_in_parallel() {
+  export PYENV_VERSION=wask-2
+  for ((i = 0; i < ${#qa_checks[@]}; i++))
+  do
+      command="${qa_checks[$i]}"
+
+      echo -e "${BLUE}Running:${NC} ${command}"
+      run_command $command &
+      pids+="$! "
+  done
+}
+
+function wait_for_processes() {
+  for pid in ${pids[@]}; do
+      wait $pid 2> /dev/null
+  done
+}
+
+
+function get_exit_code() {
+  exit_code=$(cat $exit_code_file)
+  rm -f $exit_code_file
+  echo $exit_code
+}
+
+function main() {
+  format
+  run_processes_in_parallel
+  wait_for_processes
+
+  exit $(get_exit_code)
+}
+
+main "$@"
+
+END FILE: ./app/scripts/qa
+
+START FILE: ./scripts/qa
+#!/usr/bin/env bash
+
+# Colors
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+# Parse command line arguments
+FAST_MODE=false
+for arg in "$@"; do
+    if [ "$arg" == "--fast" ]; then
+        FAST_MODE=true
+    fi
+done
+
+exit_code_file=$(mktemp)
+echo 0 >"$exit_code_file"
+
+pids=()
+
+function run_command() {
+    output=$("$@" 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        echo -e "${RED}ERR:${NC} $output\n\n"
+        echo 1 > $exit_code_file
+    else
+        echo -e "${GREEN}OK:${NC} $@"
+    fi
+}
+
+function format() {
+  run_command terraform fmt ./infra
+}
+
+function run_app_qa() {
+  echo -e "${BLUE}Running:${NC} app QA checks"
+  if [ "$FAST_MODE" = true ]; then
+    (cd app && ./scripts/qa --fast)
+  else
+    (cd app && ./scripts/qa)
+  fi
+  if [ $? -ne 0 ]; then
+    echo 1 > $exit_code_file
+  fi
+}
+
+function run_api_qa() {
+  echo -e "${BLUE}Running:${NC} api QA checks"
+  if [ "$FAST_MODE" = true ]; then
+    (cd api && ./scripts/qa --fast)
+  else
+    (cd api && ./scripts/qa)
+  fi
+  if [ $? -ne 0 ]; then
+    echo 1 > $exit_code_file
+  fi
+}
+
+function run_processes_in_parallel() {
+  run_app_qa &
+  pids+="$! "
+
+  run_api_qa &
+  pids+="$! "
+}
+
+function wait_for_processes() {
+  for pid in ${pids[@]}; do
+      wait $pid 2> /dev/null
+  done
+}
+
+function get_exit_code() {
+  exit_code=$(cat $exit_code_file)
+  rm -f $exit_code_file
+  echo $exit_code
+}
+
+function main() {
+  format
+  run_processes_in_parallel
+  wait_for_processes
+
+  exit $(get_exit_code)
+}
+
+main "$@"
+
+END FILE: ./scripts/qa
+
+
