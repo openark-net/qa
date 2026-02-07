@@ -12,13 +12,13 @@ import (
 	"github.com/openark-net/qa/pkg/qa/interfaces/presenter"
 )
 
-func Run() int {
+func Command() *cobra.Command {
 	loader := config.New(os.DirFS("."))
 	cmdRunner := runner.New()
 	executor := application.New(cmdRunner)
 	pres := presenter.New()
 
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "qa",
 		Short: "Run QA checks from .qa.yml",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -38,8 +38,10 @@ func Run() int {
 			return nil
 		},
 	}
+}
 
-	if err := cmd.Execute(); err != nil {
+func Run() int {
+	if err := Command().Execute(); err != nil {
 		return 1
 	}
 	return 0

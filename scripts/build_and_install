@@ -1,0 +1,4 @@
+#!/bin/bash
+set -e
+
+go build -o qa ./cmd/cli/main.go && sudo mv ./qa /usr/local/bin/qa

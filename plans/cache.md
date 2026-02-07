@@ -19,22 +19,22 @@ Key property: **same content = same hash, regardless of branch**. This means:
 
 ## Dirty Working Directory Check
 
-The git tree hash only reflects committed state. Uncommitted changes won't invalidate the cache on their own.
+The git tree hash only reflects committed state. We must also verify the working directory has no uncommitted changes of any kind.
 
 ```bash
-git diff --quiet <path>
-# Exit code 0 = clean, 1 = dirty
+git status --porcelain <path>
+# Empty output = clean, any output = dirty
 ```
 
 A directory is considered cache-valid only if:
-1. Tree hash matches cached hash, AND
-2. Working directory is clean (`git diff --quiet <path>` returns 0)
+1. `git status --porcelain <path>` returns empty (no untracked, modified, staged, or deleted files)
+2. Tree hash matches cached hash
 
-> **Note**: This approach needs investigation. Consider edge cases like untracked files, staged but uncommitted changes, etc.
+This is strict: any uncommitted work invalidates the cache. The only way to skip checks is when a directory is fully committed and matches the cached state.
 
 ## Cache Location
 
-Flat file structure in user's cache directory:
+Flat file structure in configurable cache directory (default: `~/.cache/qa/`):
 
 ```
 ~/.cache/qa/
@@ -44,6 +44,15 @@ Flat file structure in user's cache directory:
 ```
 
 Filename is the repo's absolute path with `/` replaced by `_`.
+
+### Configuration
+
+Cache directory can be configured via:
+```
+qa --cache-dir /custom/path    # Override cache directory
+```
+
+Default: `~/.cache/qa/`
 
 ## Cache File Format
 
@@ -106,7 +115,7 @@ cache.Flush()
 
 ### Cache Implementation
 
-- `Hit`: Compare `cmd.WorkingDir` hash to stored hash, verify `git diff --quiet` passes
+- `Hit`: Return true only if `git status --porcelain <path>` is empty AND tree hash matches stored hash
 - `RecordResult`: Track per-directory success (all commands must pass)
 - `Flush`: Write cache file, only update entries where all commands succeeded
 
@@ -115,3 +124,64 @@ cache.Flush()
 - Cache only applies to `checks`, not `format` commands (formatting should always run)
 - A directory is only cached after all its checks pass
 - Failed checks do not update the cache
+
+## CLI
+
+```
+qa --no-cache    # Skip cache, run all checks
+```
+
+When `--no-cache` is set, inject a no-op cache implementation that always returns `Hit() = false` and discards results.
+
+## Architecture
+
+Cache module follows layered architecture within `pkg/qa/infrastructure/cache/`:
+
+```
+pkg/qa/infrastructure/cache/
+├── domain/           # cache-specific domain types
+├── application/      # orchestration logic
+├── infrastructure/   # git commands, file I/O
+└── interfaces/       # exports Cache + NoOp structs
+```
+
+Git operations and file I/O are infrastructure concerns. The complex logic to determine cache validity needs proper separation.
+
+### domain/types.go
+
+Types internal to the cache subsystem:
+- `Entry` struct: `{Hash string, LastPass time.Time}`
+- `CacheData` map: `map[string]Entry` (dir path -> entry)
+
+### infrastructure/git.go
+
+Git operations:
+- `GetRepoRoot() (string, error)` - `git rev-parse --show-toplevel`
+- `GetTreeHash(path string) (string, error)` - `git rev-parse HEAD:<path>`
+- `IsDirty(path string) (bool, error)` - `git status --porcelain <path>`
+
+### infrastructure/storage.go
+
+Cache file I/O:
+- `Load(cacheDir, repoRoot string) (CacheData, error)` - read YAML
+- `Save(cacheDir, repoRoot string, data CacheData) error` - write YAML
+- Path conversion: `/Users/foo/repo` → `_Users_foo_repo.yml`
+
+### application/cache.go
+
+Orchestration logic:
+- `Hit(cmd Command) bool` - combines dirty check + hash comparison
+- `RecordResult(cmd Command, success bool)` - tracks per-directory results
+- `Flush() error` - persists only directories where ALL commands passed
+- 7-day TTL pruning on load
+
+### interfaces/service.go
+
+Exports structs implementing `domain.Cache`:
+- `Service` struct - real implementation, wraps application layer
+- `NoOp` struct - always returns `Hit()=false`, discards results
+
+## Files to Modify
+
+- `pkg/qa/application/executor.go` - add cache dependency, filter hits in runChecks
+- `pkg/qa/interfaces/cli/cli.go` - add `--no-cache` and `--cache-dir` flags, wire up cache
