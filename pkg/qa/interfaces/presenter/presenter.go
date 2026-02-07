@@ -29,6 +29,8 @@ func (p *Presenter) Run(events <-chan domain.Event) {
 			p.handleStart(e)
 		case domain.CommandFinished:
 			p.handleFinish(e)
+		case domain.CommandCached:
+			p.handleCached(e)
 		}
 	}
 
@@ -64,6 +66,10 @@ func (p *Presenter) handleFinish(e domain.CommandFinished) {
 		p.printFailureOutput(e.Result)
 	}
 	delete(p.spinners, e.Result.Command.ID())
+}
+
+func (p *Presenter) handleCached(e domain.CommandCached) {
+	pterm.FgGray.Printfln("○ %s (cached)", e.Command.Cmd)
 }
 
 func (p *Presenter) printFailureOutput(result domain.CommandResult) {

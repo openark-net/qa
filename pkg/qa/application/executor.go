@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"log"
 	"sync"
 
 	"github.com/openark-net/qa/pkg/qa/domain"
@@ -9,12 +10,14 @@ import (
 
 type Executor struct {
 	runner   domain.CommandRunner
+	cache    domain.Cache
 	eventsCh chan domain.Event
 }
 
-func New(runner domain.CommandRunner) *Executor {
+func New(runner domain.CommandRunner, cache domain.Cache) *Executor {
 	return &Executor{
 		runner:   runner,
+		cache:    cache,
 		eventsCh: make(chan domain.Event, 100),
 	}
 }
@@ -33,6 +36,9 @@ func (e *Executor) Run(ctx context.Context, cfg domain.ConfigSet) bool {
 	}
 
 	checksSuccess := e.runChecks(ctx, cfg.Checks)
+	if err := e.cache.Flush(); err != nil {
+		log.Printf("warning: failed to flush cache: %v", err)
+	}
 	e.eventsCh <- domain.PhaseCompleted{Phase: domain.PhaseChecks, Success: checksSuccess}
 
 	close(e.eventsCh)
@@ -88,13 +94,20 @@ func (e *Executor) runChecks(ctx context.Context, checks []domain.Command) bool 
 	results := make(chan bool, len(checks))
 
 	for _, cmd := range checks {
+		if e.cache.Hit(cmd) {
+			e.eventsCh <- domain.CommandCached{Command: cmd}
+			continue
+		}
+
 		wg.Add(1)
 		go func(c domain.Command) {
 			defer wg.Done()
 			e.eventsCh <- domain.CommandStarted{Command: c}
 			result := e.runner.Run(ctx, c)
 			e.eventsCh <- domain.CommandFinished{Result: result}
-			results <- result.State == domain.Completed
+			success := result.State == domain.Completed
+			e.cache.RecordResult(c, success)
+			results <- success
 		}(cmd)
 	}
 

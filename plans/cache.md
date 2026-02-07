@@ -56,6 +56,8 @@ Default: `~/.cache/qa/`
 
 ## Cache File Format
 
+Keys are paths relative to the git root:
+
 ```yaml
 # ~/.cache/qa/_Users_fargus_dv_oa_qa.yml
 app:
@@ -64,11 +66,17 @@ app:
 api:
   hash: "def456..."
   last_pass: 2024-02-06T15:30:00Z
+.:
+  hash: "789xyz..."
+  last_pass: 2024-02-06T15:30:00Z
 ```
+
+Note: `.` represents the repo root directory.
 
 ## Interface
 
 ```go
+// Defined in pkg/qa/domain/domain.go (already exists)
 type Cache interface {
     Hit(cmd Command) bool
     RecordResult(cmd Command, success bool)
@@ -80,10 +88,10 @@ type CommandCached struct {
 }
 ```
 
-- `Hit`: returns true if `cmd.WorkingDir` hash matches cached AND working dir is clean
-- `RecordResult`: tracks success/failure per directory (groups by WorkingDir internally)
+- `Hit`: converts `cmd.WorkingDir` to relative path, returns true if hash matches cached AND working dir is clean
+- `RecordResult`: tracks success/failure per directory (converts to relative path, groups internally)
 - `Flush`: persists entries where ALL commands for that directory succeeded
-- `CommandCached`: event emitted when a command is skipped due to cache hit
+- `CommandCached`: event emitted when a command is skipped due to cache hit (already defined in domain)
 
 ## Algorithm
 
@@ -95,6 +103,15 @@ type CommandCached struct {
 4. Compute current git tree hashes for relevant directories
 
 ### Executor Integration
+
+Update executor to require cache as a dependency:
+
+```go
+// pkg/qa/application/executor.go
+func New(runner domain.CommandRunner, cache domain.Cache) *Executor
+```
+
+Cache is required (not nil). CLI wires either real Cache or NoOp based on `--no-cache` flag.
 
 For each check command:
 ```
@@ -135,53 +152,79 @@ When `--no-cache` is set, inject a no-op cache implementation that always return
 
 ## Architecture
 
-Cache module follows layered architecture within `pkg/qa/infrastructure/cache/`:
+Flat structure within `pkg/qa/infrastructure/cache/`:
 
 ```
 pkg/qa/infrastructure/cache/
-├── domain/           # cache-specific domain types
-├── application/      # orchestration logic
-├── infrastructure/   # git commands, file I/O
-└── interfaces/       # exports Cache + NoOp structs
+├── cache.go      # Cache struct implementing domain.Cache
+├── noop.go       # NoOp struct implementing domain.Cache
+├── git.go        # git operations
+└── storage.go    # file I/O
 ```
 
-Git operations and file I/O are infrastructure concerns. The complex logic to determine cache validity needs proper separation.
+### cache.go
 
-### domain/types.go
+Main implementation of `domain.Cache`:
 
-Types internal to the cache subsystem:
-- `Entry` struct: `{Hash string, LastPass time.Time}`
-- `CacheData` map: `map[string]Entry` (dir path -> entry)
+```go
+type Cache struct {
+    git      *GitClient
+    storage  *Storage
+    cacheDir string
+    repoRoot string
+    data     map[string]Entry  // keyed by relative path from git root
+    results  map[string]bool   // tracks per-directory success this run
+}
 
-### infrastructure/git.go
+type Entry struct {
+    Hash     string
+    LastPass time.Time
+}
+```
 
-Git operations:
-- `GetRepoRoot() (string, error)` - `git rev-parse --show-toplevel`
-- `GetTreeHash(path string) (string, error)` - `git rev-parse HEAD:<path>`
-- `IsDirty(path string) (bool, error)` - `git status --porcelain <path>`
-
-### infrastructure/storage.go
-
-Cache file I/O:
-- `Load(cacheDir, repoRoot string) (CacheData, error)` - read YAML
-- `Save(cacheDir, repoRoot string, data CacheData) error` - write YAML
-- Path conversion: `/Users/foo/repo` → `_Users_foo_repo.yml`
-
-### application/cache.go
-
-Orchestration logic:
-- `Hit(cmd Command) bool` - combines dirty check + hash comparison
-- `RecordResult(cmd Command, success bool)` - tracks per-directory results
+- `New(cacheDir string) (*Cache, error)` - returns error if not in git repo
+- `Hit(cmd Command) bool` - converts WorkingDir to relative path, checks dirty + hash match
+- `RecordResult(cmd Command, success bool)` - tracks per-directory results (relative path)
 - `Flush() error` - persists only directories where ALL commands passed
 - 7-day TTL pruning on load
 
-### interfaces/service.go
+### noop.go
 
-Exports structs implementing `domain.Cache`:
-- `Service` struct - real implementation, wraps application layer
-- `NoOp` struct - always returns `Hit()=false`, discards results
+```go
+type NoOp struct{}
+
+func (NoOp) Hit(cmd Command) bool { return false }
+func (NoOp) RecordResult(cmd Command, success bool) {}
+func (NoOp) Flush() error { return nil }
+```
+
+### git.go
+
+```go
+type GitClient struct{}
+
+func (g *GitClient) RepoRoot() (string, error)
+func (g *GitClient) TreeHash(relativePath string) (string, error)  // path relative to repo root
+func (g *GitClient) IsDirty(relativePath string) (bool, error)     // path relative to repo root
+func (g *GitClient) ToRelative(absolutePath string) (string, error) // converts absolute to relative
+```
+
+**Critical**: All paths passed to git commands must be relative to the repo root. The cache is responsible for converting `cmd.WorkingDir` (absolute) to a relative path before any git operations or cache key lookups.
+
+### storage.go
+
+```go
+type Storage struct{}
+
+func (s *Storage) Load(cacheDir, repoRoot string) (map[string]Entry, error)
+func (s *Storage) Save(cacheDir, repoRoot string, data map[string]Entry) error
+```
+
+Path conversion for filename: `/Users/foo/repo` → `_Users_foo_repo.yml`
 
 ## Files to Modify
 
-- `pkg/qa/application/executor.go` - add cache dependency, filter hits in runChecks
+- `pkg/qa/domain/domain.go` - Cache interface already defined, no changes needed
+- `pkg/qa/application/executor.go` - add cache dependency (required, not nil), filter hits in runChecks
 - `pkg/qa/interfaces/cli/cli.go` - add `--no-cache` and `--cache-dir` flags, wire up cache
+- `pkg/qa/interfaces/presenter/presenter.go` - handle `CommandCached` event in the event loop
