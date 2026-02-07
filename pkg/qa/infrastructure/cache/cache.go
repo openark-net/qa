@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"path/filepath"
 	"time"
 
 	"github.com/openark-net/qa/pkg/qa/domain"
@@ -44,9 +45,20 @@ func New(ctx context.Context, cacheDir string) (*Cache, error) {
 	}, nil
 }
 
+func (c *Cache) resolvePath(workingDir string) string {
+	if filepath.IsAbs(workingDir) {
+		rel, err := c.git.ToRelative(workingDir)
+		if err != nil {
+			return ""
+		}
+		return rel
+	}
+	return filepath.Clean(workingDir)
+}
+
 func (c *Cache) Hit(cmd domain.Command) bool {
-	relPath, err := c.git.ToRelative(cmd.WorkingDir)
-	if err != nil {
+	relPath := c.resolvePath(cmd.WorkingDir)
+	if relPath == "" {
 		return false
 	}
 
@@ -69,8 +81,8 @@ func (c *Cache) Hit(cmd domain.Command) bool {
 }
 
 func (c *Cache) RecordResult(cmd domain.Command, success bool) {
-	relPath, err := c.git.ToRelative(cmd.WorkingDir)
-	if err != nil {
+	relPath := c.resolvePath(cmd.WorkingDir)
+	if relPath == "" {
 		return
 	}
 
