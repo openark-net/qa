@@ -3,6 +3,8 @@ package cache
 import (
 	"context"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/openark-net/qa/pkg/qa/domain"
@@ -17,6 +19,7 @@ type Cache struct {
 	cacheDir string
 	repoRoot string
 	data     map[string]Entry
+	mu       sync.Mutex
 	results  map[string]bool
 }
 
@@ -56,6 +59,10 @@ func (c *Cache) resolvePath(workingDir string) string {
 	return filepath.Clean(workingDir)
 }
 
+func cacheKey(relPath, cmd string) string {
+	return relPath + "::" + cmd
+}
+
 func (c *Cache) Hit(cmd domain.Command) bool {
 	relPath := c.resolvePath(cmd.WorkingDir)
 	if relPath == "" {
@@ -72,7 +79,8 @@ func (c *Cache) Hit(cmd domain.Command) bool {
 		return false
 	}
 
-	entry, exists := c.data[relPath]
+	key := cacheKey(relPath, cmd.Cmd)
+	entry, exists := c.data[key]
 	if !exists {
 		return false
 	}
@@ -86,27 +94,32 @@ func (c *Cache) RecordResult(cmd domain.Command, success bool) {
 		return
 	}
 
-	if existing, ok := c.results[relPath]; ok {
-		c.results[relPath] = existing && success
-	} else {
-		c.results[relPath] = success
-	}
+	key := cacheKey(relPath, cmd.Cmd)
+	c.mu.Lock()
+	c.results[key] = success
+	c.mu.Unlock()
 }
 
 func (c *Cache) Flush() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	now := time.Now()
 
-	for path, passed := range c.results {
+	for key, passed := range c.results {
 		if !passed {
 			continue
 		}
+
+		parts := strings.SplitN(key, "::", 2)
+		path := parts[0]
 
 		hash, err := c.git.TreeHash(c.ctx, path)
 		if err != nil {
 			continue
 		}
 
-		c.data[path] = Entry{
+		c.data[key] = Entry{
 			Hash:     hash,
 			LastPass: now,
 		}
