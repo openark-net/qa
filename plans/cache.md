@@ -17,6 +17,21 @@ Key property: **same content = same hash, regardless of branch**. This means:
 - Switching branches automatically invalidates cache if content differs
 - Two branches with identical directories share the same cache entry
 
+## Dirty Working Directory Check
+
+The git tree hash only reflects committed state. Uncommitted changes won't invalidate the cache on their own.
+
+```bash
+git diff --quiet <path>
+# Exit code 0 = clean, 1 = dirty
+```
+
+A directory is considered cache-valid only if:
+1. Tree hash matches cached hash, AND
+2. Working directory is clean (`git diff --quiet <path>` returns 0)
+
+> **Note**: This approach needs investigation. Consider edge cases like untracked files, staged but uncommitted changes, etc.
+
 ## Cache Location
 
 Flat file structure in user's cache directory:
