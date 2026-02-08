@@ -9,7 +9,7 @@ builds:
     goarch:
       - amd64
       - arm64
-    main: .
+    main: ./cmd/cli
     binary: qa
     flags:
       - -trimpath
