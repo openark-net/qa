@@ -20,8 +20,17 @@ func Command() *cobra.Command {
 	var cacheDir string
 
 	cmd := &cobra.Command{
-		Use:          "qa",
-		Short:        "Run QA checks from .qa.yml",
+		Use:   "qa",
+		Short: "Federated QA runner for monorepos",
+		Long: `qa runs format commands and checks defined in .qa.yml files.
+
+Checks are cached using git tree hashes—unchanged code is skipped.
+Format commands run sequentially, then checks run in parallel.
+
+Configuration (.qa.yml):
+  format:   Commands to run before checks (e.g., formatters)
+  checks:   Commands to run in parallel with caching
+  includes: Paths to other .qa.yml files to compose`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			loader := config.New(os.DirFS("."))
