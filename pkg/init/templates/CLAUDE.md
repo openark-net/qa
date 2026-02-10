@@ -28,3 +28,10 @@ Follow existing patterns in the codebase.
 
 Don't be nice to me. If I am doing something wrong, stupid, or a bad practice let me know.
 The code comes first here.
+
+# Quality Assurance
+Run this to run all of our QA processes
+
+```bash
+qa
+```
