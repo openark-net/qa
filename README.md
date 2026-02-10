@@ -73,9 +73,11 @@ checks:
 
 ## Caching
 
-Checks are cached per directory using git tree hashes. A check is skipped when:
-1. The directory has no uncommitted changes
-2. The git tree hash matches the last successful run
+Checks are cached per directory using git index tree hashes. A check is skipped when:
+1. The directory has no unstaged changes
+2. The index tree hash matches the last successful run
+
+This works seamlessly with pre-commit hooks—staged changes are cached correctly before the commit is created.
 
 ```
 $ qa

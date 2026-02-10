@@ -42,14 +42,7 @@ func (g *GitClient) RepoRoot() string {
 }
 
 func (g *GitClient) TreeHash(ctx context.Context, relativePath string) (string, error) {
-	var ref string
-	if relativePath == "." {
-		ref = "HEAD^{tree}"
-	} else {
-		ref = "HEAD:" + relativePath
-	}
-
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", ref)
+	cmd := exec.CommandContext(ctx, "git", "write-tree")
 	cmd.Dir = g.repoRoot
 
 	var stdout, stderr bytes.Buffer
@@ -60,14 +53,33 @@ func (g *GitClient) TreeHash(ctx context.Context, relativePath string) (string, 
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		return "", fmt.Errorf("git rev-parse %s: %s", ref, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("git write-tree: %s", strings.TrimSpace(stderr.String()))
+	}
+
+	rootHash := strings.TrimSpace(stdout.String())
+	if relativePath == "." {
+		return rootHash, nil
+	}
+
+	cmd = exec.CommandContext(ctx, "git", "rev-parse", rootHash+":"+relativePath)
+	cmd.Dir = g.repoRoot
+	stdout.Reset()
+	stderr.Reset()
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		return "", fmt.Errorf("git rev-parse %s:%s: %s", rootHash, relativePath, strings.TrimSpace(stderr.String()))
 	}
 
 	return strings.TrimSpace(stdout.String()), nil
 }
 
 func (g *GitClient) IsDirty(ctx context.Context, relativePath string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", relativePath)
+	cmd := exec.CommandContext(ctx, "git", "diff", "--name-only", relativePath)
 	cmd.Dir = g.repoRoot
 
 	var stdout, stderr bytes.Buffer
@@ -78,7 +90,7 @@ func (g *GitClient) IsDirty(ctx context.Context, relativePath string) (bool, err
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}
-		return false, fmt.Errorf("git status --porcelain %s: %w", relativePath, err)
+		return false, fmt.Errorf("git diff --name-only %s: %w", relativePath, err)
 	}
 
 	return stdout.Len() > 0, nil
