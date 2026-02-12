@@ -33,11 +33,23 @@ Configuration (.qa.yml):
   includes: Paths to other .qa.yml files to compose`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			loader := config.New(os.DirFS("."))
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+
+			configDir, err := config.FindConfig(cwd)
+			if err != nil {
+				return err
+			}
+
+			loader := config.New(os.DirFS(configDir))
 			cfg, err := loader.Load(".")
 			if err != nil {
 				return err
 			}
+
+			cfg = resolveWorkingDirs(cfg, configDir)
 
 			var c domain.Cache
 			if noCache {
@@ -86,4 +98,29 @@ func defaultCacheDir() string {
 		return ".cache/qa"
 	}
 	return filepath.Join(home, ".cache", "qa")
+}
+
+func resolveWorkingDirs(cfg domain.ConfigSet, baseDir string) domain.ConfigSet {
+	resolved := domain.ConfigSet{
+		Format: make(map[string][]domain.Command),
+	}
+
+	for dir, cmds := range cfg.Format {
+		absDir := filepath.Join(baseDir, dir)
+		for _, cmd := range cmds {
+			resolved.Format[absDir] = append(resolved.Format[absDir], domain.Command{
+				Cmd:        cmd.Cmd,
+				WorkingDir: absDir,
+			})
+		}
+	}
+
+	for _, cmd := range cfg.Checks {
+		resolved.Checks = append(resolved.Checks, domain.Command{
+			Cmd:        cmd.Cmd,
+			WorkingDir: filepath.Join(baseDir, cmd.WorkingDir),
+		})
+	}
+
+	return resolved
 }
