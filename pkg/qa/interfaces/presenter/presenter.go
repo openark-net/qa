@@ -12,14 +12,16 @@ import (
 const durationDisplayThreshold = 500 * time.Millisecond
 
 type Presenter struct {
+	dirs       DirColumn
 	multi      *pterm.MultiPrinter
 	spinners   map[string]*pterm.SpinnerPrinter
 	startTimes map[string]time.Time
 	done       chan struct{}
 }
 
-func New() *Presenter {
+func New(dirs DirColumn) *Presenter {
 	return &Presenter{
+		dirs:       dirs,
 		spinners:   make(map[string]*pterm.SpinnerPrinter),
 		startTimes: make(map[string]time.Time),
 		done:       make(chan struct{}),
@@ -53,7 +55,7 @@ func (p *Presenter) handleStart(e domain.CommandStarted) {
 	spinner, _ := pterm.DefaultSpinner.
 		WithWriter(p.multi.NewWriter()).
 		WithShowTimer(true).
-		Start(e.Command.Cmd)
+		Start(p.dirs.Prefix(e.Command.WorkingDir) + e.Command.Cmd)
 	p.spinners[e.Command.ID()] = spinner
 	p.startTimes[e.Command.ID()] = time.Now()
 }
@@ -66,7 +68,8 @@ func (p *Presenter) handleFinish(e domain.CommandFinished) {
 	}
 
 	duration := time.Since(p.startTimes[cmdID])
-	message := p.formatCompletionMessage(e.Result.Command.Cmd, duration)
+	prefix := p.dirs.Prefix(e.Result.Command.WorkingDir)
+	message := prefix + p.formatCompletionMessage(e.Result.Command.Cmd, duration)
 
 	if e.Result.State == domain.Completed {
 		spinner.MessageStyle = pterm.NewStyle(pterm.FgGreen)
@@ -101,8 +104,17 @@ func formatDuration(d time.Duration) string {
 }
 
 func (p *Presenter) handleCached(e domain.CommandCached) {
+	gray := pterm.NewStyle(pterm.FgGray)
+	printer := pterm.PrefixPrinter{
+		MessageStyle: gray,
+		Prefix:       pterm.Prefix{Text: "○", Style: gray},
+	}
+
+	prefix := p.dirs.Prefix(e.Command.WorkingDir)
+	message := fmt.Sprintf("%s%s (cached)", prefix, e.Command.Cmd)
+
 	writer := p.multi.NewWriter()
-	fmt.Fprintln(writer, pterm.FgGray.Sprintf("○ %s (cached)", e.Command.Cmd))
+	fmt.Fprint(writer, printer.Sprintln(message))
 }
 
 func (p *Presenter) printFailureOutput(result domain.CommandResult) {

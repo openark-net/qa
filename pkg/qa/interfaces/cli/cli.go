@@ -65,7 +65,7 @@ Configuration (.qa.yml):
 
 			cmdRunner := runner.New()
 			executor := application.New(cmdRunner, c)
-			pres := presenter.New()
+			pres := presenter.New(presenter.NewDirColumn(cfg, configDir))
 
 			go pres.Run(executor.Events())
 
